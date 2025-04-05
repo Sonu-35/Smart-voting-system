@@ -1,0 +1,8 @@
+opencv-python
+scikit-learn
+pywin32
+
+so we have 
+numpy, opencv-python
+threadpoolctl, scipy, joblib, scikit-learn
+pywin32
