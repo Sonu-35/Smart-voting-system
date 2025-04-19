@@ -8,150 +8,112 @@ import time
 from datetime import datetime
 from win32com.client import Dispatch
 
-
 def speak(str1):
     speak = Dispatch(("SAPI.SpVoice"))
-    speak.Speak(str1) 
+    speak.Speak(str1)
 
-video = cv2.VideoCapture(1)
-facedetect = cv2.CascadeClassifier(cv2.data.haarcascade + 'haarcascade_frontalface_default.xml')
+# Initialize video capture with default camera
+video = cv2.VideoCapture(0)
+if not video.isOpened():
+    raise IOError("Cannot open webcam")
 
-if not os.path.exists('data/'):
-    os.makedirs('data/')
+# Correct Haar cascade path
+facedetect = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+)
 
-with open('data/names.pkl', 'rb') as f:
+# Create data directory if needed
+data_dir = 'data/'
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
+
+# Load trained data
+with open(os.path.join(data_dir, 'names.pkl'), 'rb') as f:
     LABELS = pickle.load(f)
 
-with open('data/faces_data.pkl', 'rb') as f:
+with open(os.path.join(data_dir, 'faces_data.pkl'), 'rb') as f:
     FACES = pickle.load(f)
 
-knn = KNeighborsClassifier(n_neighbors = 5)
-
+# Initialize KNN classifier
+knn = KNeighborsClassifier(n_neighbors=5)
 knn.fit(FACES, LABELS)
-#imgBackground = cv2.imread("background.png")
 
 COL_NAMES = ['NAME', 'VOTE', 'DATE', 'TIME']
 
 while True:
     ret, frame = video.read()
+    if not ret:
+        break
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = facedetect.detectMultiScale(gray, 1.3, 5)
+
     for (x, y, w, h) in faces:
         crop_img = frame[y:y+h, x:x+w]
         resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
         output = knn.predict(resized_img)
+        
         ts = time.time()
         date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
         timestamp = datetime.fromtimestamp(ts).strftime("%H:%M-%S")
-        exist = os.path.isfile("votes" + ".csv")
-        cv2.rectangle(frame, (x,y), (x+w, y+h), (0, 0, 255), 1)
-        cv2.rectangle(frame, (x,y), (x+w, y+h), (50, 50, 255), 2)
-        cv2.rectangle(frame, (x,y-40), (x+w, y), (50, 50, 255), -1)
-        cv2.putText(frame, str(output[0]),(x, y-15), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
-        cv2.rectangle(frame, (x,y), (x+w, y+h), (50, 50, 255), 1)
-        atd = [output[0], timestamp]
 
-    imgBackground[370:370 + 480, 225:225 + 640] = frame
+        # Face bounding box and text
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 1)
+        cv2.rectangle(frame, (x, y-40), (x+w, y), (50, 50, 255), -1)
+        cv2.putText(frame, str(output[0]), (x, y-15), 
+                   cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
 
-    cv2.imshow('frame', imgBackground)
-    k = cv2.waitKey(1)
+    cv2.imshow('Voting System', frame)
 
     def check_if_exists(value):
-        try:
-            with open("votes.csv", "r") as csvfile:
-                reader = csv.reader(csvfile)
-                for row in reader:
-                    if row and row[0] == value:
-                        return True 
-        except FileNotFoundError:
-            print("File not found or unable to open the CSV file.")
+        if not os.path.exists("votes.csv"):
+            return False
+        with open("votes.csv", "r") as csvfile:
+            reader = csv.reader(csvfile)
+            for row in reader:
+                if row and row[0] == value:
+                    return True
         return False
-    
-    voter_exist = check_if_exists(output[0])
-    if voter_exist:
-        speak("YOU HAVE ALREADY VOTED")
-        break
 
-    if k == ord('1'):
-        speak("YOUR VOTE HAS BEEN RECORDED")
-        time.sleep(5)
-        if exist:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                atd = [ouput[0], "BJP", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
+    key = cv2.waitKey(1)
+    if key in [ord('1'), ord('2'), ord('3'), ord('4')]:
+        try:
+            voter_id = output[0]
+        except NameError:
+            speak("NO FACE DETECTED")
+            continue
+
+        if check_if_exists(voter_id):
+            speak("YOU HAVE ALREADY VOTED")
+            break
+
+        party_map = {
+            '1': "BJP",
+            '2': "AAP",
+            '3': "CONG",
+            '4': "NOTA"
+        }
+
+        party = party_map[chr(key)]
+        speak(f"YOUR VOTE FOR {party} HAS BEEN RECORDED")
         
-        else:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerows(COL_NAMES)
-                atd = [output[0], "BJP", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
+        # Prepare data entry
+        entry = [voter_id, party, date, timestamp]
+        
+        # Write to CSV
+        file_exists = os.path.exists("votes.csv")
+        with open("votes.csv", "a", newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            if not file_exists:
+                writer.writerow(COL_NAMES)
+            writer.writerow(entry)
+        
+        time.sleep(2)
         speak("THANK YOU FOR YOUR PARTICIPATION IN THE ELECTIONS")
         break
 
-    if k == ord('2'):
-        speak("YOUR VOTE HAS BEEN RECORDED")
-        time.sleep(5)
-        if exist:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                atd = [ouput[0], "AAP", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        
-        else:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerows(COL_NAMES)
-                atd = [output[0], "APP", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        speak("THANK YOU FOR YOUR PARTICIPATION IN THE ELECTIONS")
+    elif key == ord('q'):
         break
 
-    if k == ord('3'):
-        speak("YOUR VOTE HAS BEEN RECORDED")
-        time.sleep(5)
-        if exist:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                atd = [ouput[0], "CONG", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        
-        else:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerows(COL_NAMES)
-                atd = [output[0], "CONG", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        speak("THANK YOU FOR YOUR PARTICIPATION IN THE ELECTIONS")
-        break
-
-    if k == ord('4'):
-        speak("YOUR VOTE HAS BEEN RECORDED")
-        time.sleep(5)
-        if exist:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                atd = [ouput[0], "NOTA", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        
-        else:
-            with open("votes" + ".csv", "+a") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerows(COL_NAMES)
-                atd = [output[0], "NOTA", date, timestamp]
-                writer.writerow(atd)
-            csvfile.close()
-        speak("THANK YOU FOR YOUR PARTICIPATION IN THE ELECTIONS")
-        break
-
-
-    video.release()
-    cv2.destroyAllWindows()
+video.release()
+cv2.destroyAllWindows()
