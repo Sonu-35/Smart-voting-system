@@ -3,64 +3,84 @@ import pickle
 import numpy as np
 import os
 
-if not os.path.exists('data/'):
-    os.makedirs('data/')
+# Create data directory if it doesn't exist
+data_dir = 'data/'
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
 
+# Initialize video capture (changed to 0 for default webcam)
 video = cv2.VideoCapture(1)
-facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+if not video.isOpened():
+    raise IOError("Cannot open webcam")
+
+# Load Haar cascade for face detection
+facedetect = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+)
+
 faces_data = []
+name = input("Enter your Aadhar number: ")
+frames_total = 51
+capture_interval = 2  # Capture every 2nd frame
+frame_counter = 0      # Tracks frames for capture timing
 
-i = 0 
-name = input("Enter your aadhar number: ")
-framesTotal = 51
-captureAfterFrame = 2
-
-while True: 
+while True:
     ret, frame = video.read()
+    if not ret:
+        break
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = facedetect.detectMultiScale(gray, 1.3, 5)
-    for(x, y, w, h) in faces:
-        crop_img = frame[y:y+h, x:x+w]
-        resized_img = cv2.resize(crop_img, (50, 50))
-        if len(faces_data) <= framesTotal and i % captureAfterFrame == 0:
-            faces_data.append(resized_img)
-            i = i + 1
-        cv2.putText(frame, str(len(faces_data)), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (50,50,255), 1)
-        cv2.rectangle(frame, (x,y), (x+w, y+h), (50, 50, 255), 1)
 
-    cv2.imshow('frame', frame)
-    k = cv2.waitKey(1)
-    if k == ord('q') or len(faces_data) >= framesTotal:
+    frame_counter += 1  # Increment every frame
+
+    # Capture face every 'capture_interval' frames
+    if frame_counter % capture_interval == 0:
+        for (x, y, w, h) in faces:
+            if len(faces_data) < frames_total:
+                # Process and store face
+                crop_img = frame[y:y+h, x:x+w]
+                resized_img = cv2.resize(crop_img, (50, 50))
+                faces_data.append(resized_img)
+
+                # Visual feedback
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (50, 50, 255), 1)
+                cv2.putText(frame, f"Captured: {len(faces_data)}/{frames_total}",
+                            (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
+                break  # Capture only one face per interval
+
+    cv2.imshow('Registration', frame)
+
+    # Exit on 'q' or when enough faces are captured
+    if cv2.waitKey(1) == ord('q') or len(faces_data) >= frames_total:
         break
 
 video.release()
 cv2.destroyAllWindows()
 
-#print(len(faces_data))
-faces_data = np.asarray(faces_data)
-faces_data = faces_data.reshape((framesTotal, -1))
+# Convert and save data
+faces_data = np.asarray(faces_data).reshape(len(faces_data), -1)
 
-if 'names.pkl' not in os.listdir('data/'):
-    names = [name]*framesTotal
-    with open('data/names.pkl', 'wb') as f:
-        pickle.dump(names, f)
-
-else:
-    with open('data/names.pkl', 'rb') as f:
+# Save names
+names_path = os.path.join(data_dir, 'names.pkl')
+if os.path.exists(names_path):
+    with open(names_path, 'rb') as f:
         names = pickle.load(f)
-    names = names + [name] * framesTotal
-    
-    with open('data/names.pkl', 'wb') as f:
-        pickle.dump(names, f)
-
-if 'faces_data.pkl' not in os.listdir('data/'):
-    with open('data/faces_data.pkl', 'wb') as f:
-        pickle.dump(faces_data, f)
-
+    names += [name] * len(faces_data)
 else:
-    with open('data/faces_data.pkl', 'rb') as f:
-        faces = pickle.load(f)
-        faces = np.append(faces, faces_data, axis = 0)
-    
-    with open ('data/faces_data.pkl', 'wb') as f:
-        pickle.dump(faces, f)
+    names = [name] * len(faces_data)
+
+with open(names_path, 'wb') as f:
+    pickle.dump(names, f)
+
+# Save face data
+faces_path = os.path.join(data_dir, 'faces_data.pkl')
+if os.path.exists(faces_path):
+    with open(faces_path, 'rb') as f:
+        existing_faces = pickle.load(f)
+    faces_data = np.vstack((existing_faces, faces_data))
+
+with open(faces_path, 'wb') as f:
+    pickle.dump(faces_data, f)
+
+print(f"Registered {len(faces_data)} samples for {name}")
